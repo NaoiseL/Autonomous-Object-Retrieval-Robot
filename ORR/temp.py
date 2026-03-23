@@ -440,7 +440,8 @@ class RobotController:
 
     def start_recording(self):
         self.recording_enabled = True
-        self.action_log = []
+        if not self.action_log:
+            self.action_log = []
         print("\n[RECORD] Started recording movements")
 
     def stop_recording(self):
@@ -542,10 +543,7 @@ class RobotController:
             else:
                 delay = 0.3
 
-            time.sleep(delay)
 
-            # STOP after movement
-            self.stop()
 
         print("\nReturn sequence complete")
 
@@ -774,19 +772,16 @@ class AutonomousSortingRobot:
                     return True
 
 
-                # Only send command if changed
-                # Only send command AND log when it changes
+                # Log EVERY frame movement (this is the important part)
+                self.controller.log_frame_action(
+                    action,
+                    self.frame_count,
+                    "APPROACHING",
+                    target_color
+                )
+
+                # Only send command when it changes
                 if action != self.controller.last_command:
-
-                    # Log the action change with the current frame
-                    self.controller.log_frame_action(
-                        action,
-                        self.frame_count,
-                        "APPROACHING",
-                        target_color
-                    )
-
-                    # Send the command to Arduino
                     self.controller.send_command(action)
 
                 time.sleep(1 / self.cam_config.fps)
@@ -854,13 +849,21 @@ class AutonomousSortingRobot:
             self.controller.grasp()
             self.log_event("GRASPING", "grasp", status="success")
 
+            # IMPORTANT: freeze the recorded path
+            return_path_copy = list(self.controller.action_log)
+
             print("Performing 180deg turn...")
             self.controller.turn_180()
 
-            # Execute return path with exact timing
-            time.sleep(0.5)
+            # Restore the recorded path (ensures it wasn't modified)
+            self.controller.action_log = return_path_copy
+
+            print("\nStarting return path...")
             self.controller.execute_return_path()
             time.sleep(1)
+            
+            self.controller.turn_180()
+            self.controller.forward(self.motion_config.backup_duration)
 
             print("\nReached starting position - STOPPING")
             self.controller.stop()
@@ -868,14 +871,30 @@ class AutonomousSortingRobot:
 
             print("Releasing object...")
             self.controller.release()
-            self.log_event("RELEASING", "release", status="complete")
+
+            # START RECORDING HERE
+            print("[PATH] Recording from release point")
+            self.controller.start_recording()
 
             print("Backing up...")
+
+            self.controller.log_frame_action(
+                "BACKWARD",
+                self.frame_count,
+                "REPOSITION"
+            )
+
             self.controller.backward(self.motion_config.backup_duration)
             self.controller.stop()
-            time.sleep(0.5)
 
             print("Turning to face search area...")
+
+            self.controller.log_frame_action(
+                "LEFT",   # direction doesn't matter for replay
+                self.frame_count,
+                "REPOSITION"
+            )
+
             self.controller.turn_180()
 
             # Mark as retrieved
