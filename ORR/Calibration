@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""
+DISTANCE CALIBRATION for Blue Blobs - BROAD BLUE DETECTION
+Wide HSV ranges to catch all shades of blue
+"""
+
+import cv2
+import numpy as np
+from picamera2 import Picamera2
+import time
+
+# ================= BROAD BLUE DETECTION =================
+# WIDE HSV ranges for blue - catches many shades
+LOWER_BLUE = np.array([90, 100, 100])     # Lower bound for blue
+UPPER_BLUE = np.array([130, 255, 255])    # Upper bound for blue
+
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
+
+class BroadBlueCalibrator:
+    def __init__(self):
+        # Initialize camera
+        self.picam2 = Picamera2()
+        config = self.picam2.create_preview_configuration(
+            main={"size": (FRAME_WIDTH, FRAME_HEIGHT)}
+        )
+        self.picam2.configure(config)
+        
+        print("Starting broad blue detection calibration...")
+        self.picam2.start()
+        time.sleep(2)
+        
+        # Create windows
+        cv2.namedWindow("Main View", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("Mask View", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Main View", 800, 600)
+        cv2.resizeWindow("Mask View", 400, 300)
+        
+        # Distance calibration data
+        self.distance_samples = []  # (distance_cm, blob_area)
+        self.current_distance = 50  # cm
+        self.min_blob_size = 100    # Minimum blob area
+        
+        print("\n" + "="*60)
+        print("BROAD BLUE BLOB DETECTION CALIBRATION")
+        print("="*60)
+        print("\nHSV RANGE USED:")
+        print(f"  Blue Range: Hue 90-130, Sat 100-255, Val 100-255")
+        print("\nINSTRUCTIONS:")
+        print("1. Place ANY blue object in view")
+        print("2. Press 1-9 to set distance (10-90cm)")
+        print("3. Press 0 for 100cm")
+        print("4. Press SPACE to record sample")
+        print("5. Press 's' to save when done")
+        print("6. Press 'q' to quit")
+        print("\n" + "="*60)
+    
+    def detect_blue_blob(self, frame):
+        """Detect ANY blue blob with broad HSV ranges"""
+        # Convert to BGR then HSV
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        
+        # Apply slight blur to reduce noise
+        frame_blur = cv2.GaussianBlur(frame_bgr, (5, 5), 0)
+        hsv = cv2.cvtColor(frame_blur, cv2.COLOR_BGR2HSV)
+        
+        # Create mask with BROAD range (blue is simpler than red - single range)
+        mask = cv2.inRange(hsv, LOWER_BLUE, UPPER_BLUE)
+        
+        # Strong morphological operations to connect nearby blue areas
+        kernel = np.ones((7, 7), np.uint8)
+        mask = cv2.erode(mask, kernel, iterations=1)
+        mask = cv2.dilate(mask, kernel, iterations=3)
+        mask = cv2.dilate(mask, None, iterations=1)
+        
+        # Find ALL contours
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if contours:
+            # Find largest contour (biggest blue area)
+            largest = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(largest)
+            
+            if area > self.min_blob_size:
+                # Get enclosing circle
+                ((x, y), radius) = cv2.minEnclosingCircle(largest)
+                center = (int(x), int(y))
+                
+                # Calculate some additional stats
+                x, y, w, h = cv2.boundingRect(largest)
+                
+                return {
+                    'detected': True,
+                    'area': area,
+                    'center': center,
+                    'radius': radius,
+                    'width': w,
+                    'height': h,
+                    'contour': largest,
+                    'frame_bgr': frame_bgr,
+                    'mask': mask
+                }
+        
+        return {
+            'detected': False,
+            'frame_bgr': frame_bgr,
+            'mask': np.zeros((FRAME_HEIGHT, FRAME_WIDTH), dtype=np.uint8)
+        }
+    
+    def draw_display(self, frame_bgr, blob_data):
+        """Draw comprehensive display"""
+        display = frame_bgr.copy()
+        
+        if blob_data['detected']:
+            # Draw blob with bounding box
+            cv2.circle(display, blob_data['center'], int(blob_data['radius']), (0, 255, 0), 3)
+            cv2.circle(display, blob_data['center'], 5, (255, 0, 0), -1)  # Blue center
+            
+            # Draw bounding rectangle
+            x = blob_data['center'][0] - blob_data['width']//2
+            y = blob_data['center'][1] - blob_data['height']//2
+            cv2.rectangle(display, (x, y), (x + blob_data['width'], y + blob_data['height']), (255, 0, 0), 2)
+            
+            # Draw contour
+            cv2.drawContours(display, [blob_data['contour']], -1, (255, 255, 0), 1)
+            
+            # Display detailed info
+            info = [
+                "BLUE BLOB DETECTED",
+                f"Area: {blob_data['area']:.0f} pixels",
+                f"Size: {blob_data['width']}x{blob_data['height']}",
+                f"Radius: {blob_data['radius']:.1f} px",
+                f"Current Distance: {self.current_distance} cm",
+                f"Samples Recorded: {len(self.distance_samples)}"
+            ]
+        else:
+            info = [
+                "NO BLUE BLOB DETECTED",
+                f"Current Distance: {self.current_distance} cm",
+                f"Samples Recorded: {len(self.distance_samples)}",
+                f"Min Blob Size: {self.min_blob_size} pixels"
+            ]
+        
+        # Draw info text
+        y_pos = 30
+        for text in info:
+            color = (255, 255, 255) if blob_data['detected'] else (0, 100, 255)
+            cv2.putText(display, text, (10, y_pos), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            y_pos += 25
+        
+        # Draw distance markers
+        cv2.line(display, (FRAME_WIDTH//2, 0), (FRAME_WIDTH//2, FRAME_HEIGHT), (0, 255, 255), 1)
+        cv2.line(display, (0, FRAME_HEIGHT//2), (FRAME_WIDTH, FRAME_HEIGHT//2), (0, 255, 255), 1)
+        
+        # Draw recorded samples visualization
+        if self.distance_samples:
+            y_offset = FRAME_HEIGHT - 100
+            cv2.putText(display, f"Last {min(5, len(self.distance_samples))} samples:", 
+                       (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            y_offset += 20
+            
+            recent = self.distance_samples[-5:]
+            for dist, area in recent:
+                text = f"  {dist}cm: {area:.0f} pixels"
+                cv2.putText(display, text, (10, y_offset), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 100), 1)
+                y_offset += 15
+        
+        # Instructions at bottom
+        cv2.putText(display, "1-9:SetDist(10-90cm) | 0:100cm | SPACE:Record | s:Save | q:Quit", 
+                   (10, FRAME_HEIGHT - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        
+        return display
+    
+    def create_mask_display(self, blob_data):
+        """Create enhanced mask display for debugging"""
+        if blob_data['detected']:
+            # Create colorized mask
+            mask_colored = cv2.cvtColor(blob_data['mask'], cv2.COLOR_GRAY2BGR)
+            
+            # Highlight the detected blob in BLUE
+            mask_colored[blob_data['mask'] > 0] = [255, 0, 0]  # Blue in BGR
+            
+            # Draw contour on mask
+            cv2.drawContours(mask_colored, [blob_data['contour']], -1, (0, 255, 0), 2)
+            cv2.circle(mask_colored, blob_data['center'], 5, (255, 255, 0), -1)
+            
+            # Add mask info
+            cv2.putText(mask_colored, "BLUE DETECTION MASK", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(mask_colored, f"Blue Pixels: {np.count_nonzero(blob_data['mask'])}", 
+                       (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            
+            return mask_colored
+        else:
+            # Show what the mask sees (even if no blob)
+            mask_display = cv2.cvtColor(blob_data['mask'], cv2.COLOR_GRAY2BGR)
+            cv2.putText(mask_display, "NO BLUE BLOB DETECTED", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            return mask_display
+    
+    def record_sample(self, blob_data):
+        """Record blob size at current distance"""
+        if blob_data['detected']:
+            self.distance_samples.append((self.current_distance, blob_data['area']))
+            print(f"RECORDED: {self.current_distance}cm -> Area: {blob_data['area']:.0f} pixels")
+            
+            # Auto-calculate after each sample
+            if len(self.distance_samples) >= 2:
+                self.auto_calculate()
+        else:
+            print(f"SKIPPED: No blue blob detected at {self.current_distance}cm")
+            print("Try moving object closer or check lighting")
+    
+    def auto_calculate(self):
+        """Auto-calculate calibration after recording"""
+        if len(self.distance_samples) < 2:
+            return
+        
+        samples = sorted(self.distance_samples, key=lambda x: x[0])
+        
+        # Calculate k for each sample (area = k / distance^2)
+        k_values = [area * (dist ** 2) for dist, area in samples]
+        avg_k = np.mean(k_values)
+        std_k = np.std(k_values)
+        
+        print("\n--- CALIBRATION UPDATE ---")
+        print(f"Samples: {len(samples)}")
+        print(f"Average k = {avg_k:.0f} (std: {std_k:.0f})")
+        
+        # Show estimated areas for common distances
+        print("\nEstimated blue blob areas at different distances:")
+        print("Distance -> Estimated Area")
+        for dist in [10, 15, 20, 30, 40, 50, 60, 80, 100]:
+            est_area = avg_k / (dist ** 2)
+            print(f"  {dist:3d} cm: {est_area:7.0f} pixels")
+        
+        # Suggest thresholds
+        min_area = min(area for _, area in samples)
+        close_area_20cm = avg_k / (20 ** 2)
+        close_area_30cm = avg_k / (30 ** 2)
+        
+        print(f"\nSuggested thresholds for BLUE detection:")
+        print(f"  MIN_BLOB_AREA = {int(min_area * 0.3)}  # 30% of smallest recorded")
+        print(f"  CLOSE_20CM = {int(close_area_20cm)}  # Area at 20cm (grasping)")
+        print(f"  CLOSE_30CM = {int(close_area_30cm)}  # Area at 30cm (approaching)")
+    
+    def save_calibration(self):
+        """Save calibration data"""
+        if not self.distance_samples:
+            print("ERROR: No samples to save!")
+            return
+        
+        # Calculate calibration
+        samples = sorted(self.distance_samples, key=lambda x: x[0])
+        k_values = [area * (dist ** 2) for dist, area in samples]
+        avg_k = np.mean(k_values)
+        
+        # Calculate thresholds
+        min_area = min(area for _, area in samples)
+        close_20cm = avg_k / (20 ** 2)
+        close_30cm = avg_k / (30 ** 2)
+        
+        # Save to file
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"blue_calibration_{timestamp}.py"
+        
+        with open(filename, 'w') as f:
+            f.write('# BROAD BLUE DETECTION CALIBRATION DATA\n')
+            f.write(f'# Generated: {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.write(f'# Samples: {len(samples)}\n\n')
+            
+            f.write('import numpy as np\n\n')
+            
+            f.write('# BROAD HSV RANGES FOR BLUE\n')
+            f.write('LOWER_BLUE = np.array([90, 100, 100])\n')
+            f.write('UPPER_BLUE = np.array([130, 255, 255])\n\n')
+            
+            f.write('# CALIBRATION CONSTANT (Area = CALIB_K / Distance^2)\n')
+            f.write(f'CALIB_K = {avg_k:.0f}\n\n')
+            
+            f.write('# DETECTION THRESHOLDS\n')
+            f.write(f'MIN_BLOB_AREA = {int(min_area * 0.3)}  # Minimum blue area to track\n')
+            f.write(f'CLOSE_AREA_THRESHOLD = {int(close_20cm)}  # Area at ~20cm (grasp)\n')
+            f.write(f'APPROACH_AREA_THRESHOLD = {int(close_30cm)}  # Area at ~30cm (approach)\n\n')
+            
+            f.write('# FRAME SETTINGS\n')
+            f.write('FRAME_WIDTH = 640\n')
+            f.write('FRAME_HEIGHT = 480\n')
+            f.write('TURN_THRESHOLD = 50  # Pixels from center to turn\n\n')
+            
+            f.write('# RAW CALIBRATION DATA (distance_cm, area_pixels)\n')
+            f.write('DISTANCE_SAMPLES = [\n')
+            for dist, area in samples:
+                f.write(f'    ({dist}, {area:.1f}),\n')
+            f.write(']\n')
+        
+        print(f"\nSUCCESS: Blue calibration saved to {filename}")
+        print("\n--- COPY THESE VALUES TO PRODUCTION CODE ---")
+        print(f"CALIB_K = {avg_k:.0f}")
+        print(f"MIN_BLOB_AREA = {int(min_area * 0.3)}")
+        print(f"CLOSE_AREA_THRESHOLD = {int(close_20cm)}")
+        print("---")
+        print("\nFormula: Distance = sqrt(CALIB_K / Blue_Blob_Area)")
+        print("When blue_blob_area > CLOSE_AREA_THRESHOLD, object is ~20cm away")
+    
+    def run(self):
+        """Main calibration loop"""
+        print("\nREADY FOR BLUE CALIBRATION!")
+        print("Place blue object at different distances and record samples")
+        print("The mask window shows what blue is being detected\n")
+        
+        try:
+            while True:
+                # Capture frame
+                frame = self.picam2.capture_array()
+                
+                # Detect blue blob with BROAD ranges
+                blob_data = self.detect_blue_blob(frame)
+                
+                # Draw main display
+                display = self.draw_display(blob_data['frame_bgr'], blob_data)
+                
+                # Create mask display
+                mask_display = self.create_mask_display(blob_data)
+                
+                # Show both windows
+                cv2.imshow("Main View", display)
+                cv2.imshow("Mask View", mask_display)
+                
+                # Handle keys
+                key = cv2.waitKey(1) & 0xFF
+                
+                if key == ord('q'):
+                    break
+                elif key == ord(' '):  # SPACE
+                    self.record_sample(blob_data)
+                elif key == ord('s'):
+                    self.save_calibration()
+                elif ord('1') <= key <= ord('9'):
+                    self.current_distance = (key - ord('0')) * 10
+                    print(f"DISTANCE SET: {self.current_distance}cm")
+                elif key == ord('0'):
+                    self.current_distance = 100
+                    print(f"DISTANCE SET: {self.current_distance}cm")
+                elif key == ord('+'):
+                    self.min_blob_size += 50
+                    print(f"MIN BLOB SIZE: {self.min_blob_size}")
+                elif key == ord('-'):
+                    self.min_blob_size = max(50, self.min_blob_size - 50)
+                    print(f"MIN BLOB SIZE: {self.min_blob_size}")
+                
+        except KeyboardInterrupt:
+            print("\nBlue calibration interrupted")
+        finally:
+            self.picam2.stop()
+            cv2.destroyAllWindows()
+            
+            if self.distance_samples:
+                print(f"\nCOMPLETE: Recorded {len(self.distance_samples)} blue distance samples")
+            else:
+                print("\nWARNING: No blue samples recorded")
+
+if __name__ == "__main__":
+    calibrator = BroadBlueCalibrator()
+    calibrator.run()
