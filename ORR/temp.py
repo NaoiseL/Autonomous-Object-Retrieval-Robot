@@ -861,9 +861,11 @@ class AutonomousSortingRobot:
             print("\nStarting return path...")
             self.controller.execute_return_path()
             time.sleep(1)
-            
-            self.controller.turn_180()
-            self.controller.forward(self.motion_config.backup_duration)
+
+            if len(self.retrieved_objects) >= 1:
+                print("Repositioning for next search...")
+                self.controller.turn_180()
+                self.controller.forward(self.motion_config.backup_duration)
 
             print("\nReached starting position - STOPPING")
             self.controller.stop()
