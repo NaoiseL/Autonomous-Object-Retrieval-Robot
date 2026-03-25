@@ -27,7 +27,7 @@ Servo tiltServo;
 Servo clawServo;
 
 
-#define TURN_180_TIME 1800
+#define TURN_180_TIME 1950
 
 // TRACKING POSITION: Necessary for smooth transitions
 int currentClaw = 170;
@@ -211,8 +211,3 @@ void stopMotors() {
     motor3.stop();
     motor4.stop();
 }
-
-
-
-
-
