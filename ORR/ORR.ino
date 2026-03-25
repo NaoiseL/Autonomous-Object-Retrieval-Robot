@@ -175,7 +175,7 @@ void executeCommand(String cmd) {
 
     else if (cmd == "TURN_180") {
         Serial.println("EXEC: TURN_180");
-        setStripColor(stripA.Color(128, 0, 128)));
+        setStripColor(stripA.Color(128, 0, 128));
         motor1.run(-SPEED_TURN_180);
         motor2.run(-SPEED_TURN_180);
         motor3.run(-SPEED_TURN_180);
