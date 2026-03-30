@@ -579,7 +579,7 @@ class AutonomousSortingRobot:
         self.approach_start_time = 0
         self.lost_counter = 0  # Track consecutive lost frames
 
-    def initialize(self):
+    def initialise(self):
         print("\n" + "="*60)
         print("AUTONOMOUS SORTING ROBOT INITIALISATION")
         print("="*60)
@@ -1076,7 +1076,7 @@ class AutonomousSortingRobot:
 
     def run(self):
         try:
-            self.initialize()
+            self.initialise()
 
             print("\nStarting autonomous mission in 3 seconds...")
             for i in range(3, 0, -1):
