@@ -3,7 +3,7 @@
 BlueBot Autonomous Multi-Object Retrieval System with Reactive Obstacle Avoidance
 Retrieves objects in sequence (BLUE -> RED -> GREEN) automatically
 Avoids obstacles by circling around them when they block the path
-Camera is FLIPPED (hflip=1, vflip=1) - colors are inverted
+Camera is FLIPPED (hflip=1, vflip=1) - colours are inverted
 Records ALL movements continuously from first detection to grasp
 """
 
@@ -41,8 +41,8 @@ class DetectionConfig:
     obstacle_safety_margin: int = 30  # Additional pixels beyond object radius
     max_lost_frames: int = 30  # Maximum frames without target before aborting
 
-    # Color ranges for FLIPPED camera - CALIBRATED VALUES
-    color_ranges = {
+    # Colour ranges for FLIPPED camera - CALIBRATED VALUES
+    colour_ranges = {
         'blue': {
             'lower': np.array([0, 152, 49]),      # Calibrated for blue object
             'upper': np.array([16, 255, 255])
@@ -75,7 +75,7 @@ class MotionConfig:
 # ENUMS AND DATA CLASSES
 # ============================================================================
 
-class ObjectColor(Enum):
+class ObjectColour(Enum):
     BLUE = "blue"
     RED = "red"
     GREEN = "green"
@@ -98,7 +98,7 @@ class AvoidanceDirection(Enum):
 
 @dataclass
 class DetectedObject:
-    color: ObjectColor
+    colour: ObjectColour
     position: Tuple[int, int]
     area: float
     distance: float
@@ -111,20 +111,20 @@ class ActionRecord:
     frame: int
     action: str
     stage: str
-    color: Optional[ObjectColor] = None
+    colour: Optional[ObjectColour] = None
 
 # ============================================================================
-# ENHANCED COLOR DETECTOR
+# ENHANCED COLOUR DETECTOR
 # ============================================================================
 
-class ColorDetector:
+class ColourDetector:
     def __init__(self, config: DetectionConfig):
         self.config = config
         self.frame = None
         self.hsv = None
         self.all_objects = []
         self.target_object = None
-        self.current_color = None
+        self.current_colour = None
         self.target_first_detected = False  # Flag to track if we've ever seen the target
         self.frame_count = 0
         self.frame_width = CameraConfig().width
@@ -136,8 +136,8 @@ class ColorDetector:
 
         all_detected = []
 
-        for color_name, ranges in self.config.color_ranges.items():
-            color = ObjectColor(color_name)
+        for colour_name, ranges in self.config.colour_ranges.items():
+            colour = ObjectColour(colour_name)
 
             if 'lower1' in ranges:
                 mask1 = cv2.inRange(self.hsv, ranges['lower1'], ranges['upper1'])
@@ -161,7 +161,7 @@ class ColorDetector:
                     distance = (self.config.calib_k / area) ** 0.5
 
                     obj = DetectedObject(
-                        color=color,
+                        colour=colour,
                         position=(cx, cy),
                         area=area,
                         distance=distance,
@@ -173,34 +173,34 @@ class ColorDetector:
         self.all_objects = all_detected
 
         # Update target object
-        if self.current_color:
-            self.target_object = self.get_object_by_color(self.current_color)
+        if self.current_colour:
+            self.target_object = self.get_object_by_colour(self.current_colour)
             if self.target_object is not None and not self.target_first_detected:
                 self.target_first_detected = True
-                print(f"\n[TRACK] Target {self.current_color.value} first detected at frame {self.frame_count}")
+                print(f"\n[TRACK] Target {self.current_colour.value} first detected at frame {self.frame_count}")
 
         return all_detected
 
-    def set_target_color(self, color: ObjectColor):
-        self.current_color = color
-        self.target_object = self.get_object_by_color(color)
+    def set_target_colour(self, colour: ObjectColour):
+        self.current_colour = colour
+        self.target_object = self.get_object_by_colour(colour)
         # Don't reset target_first_detected here - it persists throughout the approach
 
     def reset_target_tracking(self):
         """Reset the target tracking state for a new approach"""
         self.target_first_detected = False
 
-    def get_object_by_color(self, color: ObjectColor) -> Optional[DetectedObject]:
-        same_color = [obj for obj in self.all_objects if obj.color == color and not obj.is_retrieved]
-        if same_color:
-            return max(same_color, key=lambda obj: obj.area)
+    def get_object_by_colour(self, colour: ObjectColour) -> Optional[DetectedObject]:
+        same_colour = [obj for obj in self.all_objects if obj.colour == colour and not obj.is_retrieved]
+        if same_colour:
+            return max(same_colour, key=lambda obj: obj.area)
         return None
 
-    def get_obstacles(self, exclude_color: Optional[ObjectColor] = None) -> List[DetectedObject]:
+    def get_obstacles(self, exclude_colour: Optional[ObjectColour] = None) -> List[DetectedObject]:
         """Get all non-target objects"""
         obstacles = []
         for obj in self.all_objects:
-            if exclude_color is not None and obj.color == exclude_color:
+            if exclude_colour is not None and obj.colour == exclude_colour:
                 continue
             if not obj.is_retrieved:
                 obstacles.append(obj)
@@ -237,20 +237,20 @@ class ColorDetector:
         if self.target_object is None:
             return "SEARCH"
 
-        center_left = self.frame_width * 20 // 100
-        center_right = self.frame_width * 80 // 100
+        centre_left = self.frame_width * 20 // 100
+        centre_right = self.frame_width * 80 // 100
 
         x = self.target_object.position[0]
 
-        # Check if target is centered enough to consider grasping
-        if x >= center_left and x <= center_right:
+        # Check if target is centred enough to consider grasping
+        if x >= centre_left and x <= centre_right:
             if self.target_object.area > self.config.grasp_area_threshold:
                 return "GRASP"
             else:
                 return "FORWARD"
 
-        # Target is off-center, need to turn
-        return "LEFT" if x < center_left else "RIGHT"
+        # Target is off-centre, need to turn
+        return "LEFT" if x < centre_left else "RIGHT"
 
 # ============================================================================
 # REACTIVE OBSTACLE AVOIDANCE
@@ -264,10 +264,10 @@ class ObstacleAvoidance:
         self.avoid_direction = AvoidanceDirection.LEFT
         self.obstacle_to_avoid = None
         self.avoidance_start_time = 0
-        self.maneuver_step = 0  # Track which step of avoidance we're in
+        self.manoeuvre_step = 0  # Track which step of avoidance we're in
 
-    def check_and_avoid(self, detector: ColorDetector, controller: 'RobotController',
-                        target_color: ObjectColor) -> bool:
+    def check_and_avoid(self, detector: ColourDetector, controller: 'RobotController',
+                        target_colour: ObjectColour) -> bool:
         """
         Check for blocking obstacles and initiate avoidance if needed.
         Returns True if avoidance is in progress.
@@ -275,7 +275,7 @@ class ObstacleAvoidance:
         if detector.target_object is None:
             return False
 
-        obstacles = detector.get_obstacles(exclude_color=target_color)
+        obstacles = detector.get_obstacles(exclude_colour=target_colour)
 
         # Check each obstacle
         for obstacle in obstacles:
@@ -285,7 +285,7 @@ class ObstacleAvoidance:
                     self.avoiding = True
                     self.obstacle_to_avoid = obstacle
                     self.avoidance_start_time = time.time()
-                    self.maneuver_step = 0
+                    self.manoeuvre_step = 0
 
                     # Decide which way to go based on obstacle position
                     if obstacle.position[0] < detector.target_object.position[0]:
@@ -293,7 +293,7 @@ class ObstacleAvoidance:
                     else:
                         self.avoid_direction = AvoidanceDirection.LEFT
 
-                    print(f"\n[AVOID] Obstacle {obstacle.color.value} detected at {obstacle.position}")
+                    print(f"\n[AVOID] Obstacle {obstacle.colour.value} detected at {obstacle.position}")
                     print(f"[AVOID] Danger zone radius: {detector.get_object_radius(obstacle) + self.config.obstacle_safety_margin} pixels")
                     print(f"[AVOID] Moving to the {self.avoid_direction.value} to get around")
                     return True
@@ -306,15 +306,15 @@ class ObstacleAvoidance:
             print("[AVOID] Path clear, resuming approach")
             self.avoiding = False
             self.obstacle_to_avoid = None
-            self.maneuver_step = 0
+            self.manoeuvre_step = 0
 
         return False
 
-    def execute_avoidance_maneuver(self, controller: 'RobotController',
-                                   detector: ColorDetector, frame: np.ndarray,
-                                   target_color: ObjectColor) -> Tuple[bool, str, float]:
+    def execute_avoidance_manoeuvre(self, controller: 'RobotController',
+                                   detector: ColourDetector, frame: np.ndarray,
+                                   target_colour: ObjectColour) -> Tuple[bool, str, float]:
         """
-        Execute a smarter avoidance maneuver:
+        Execute a smarter avoidance manoeuvre:
         1. Turn toward the direction of the obstacle (to go around it)
         2. Move forward slightly
         3. Turn back to face the target area
@@ -328,7 +328,7 @@ class ObstacleAvoidance:
 
         duration = self.motion_config.orbit_duration
 
-        if self.maneuver_step == 0:
+        if self.manoeuvre_step == 0:
 
             print(f"[AVOID] Step 1: Turning {self.avoid_direction.value}")
 
@@ -340,11 +340,11 @@ class ObstacleAvoidance:
             time.sleep(duration)
             controller.stop()
 
-            self.maneuver_step = 1
+            self.manoeuvre_step = 1
             return True, "TURN", duration
 
 
-        elif self.maneuver_step == 1:
+        elif self.manoeuvre_step == 1:
 
             print("[AVOID] Step 2: Moving forward")
 
@@ -353,11 +353,11 @@ class ObstacleAvoidance:
             time.sleep(duration * 1.5)
             controller.stop()
 
-            self.maneuver_step = 2
+            self.manoeuvre_step = 2
             return True, "FORWARD", duration
 
 
-        elif self.maneuver_step == 2:
+        elif self.manoeuvre_step == 2:
 
             print("[AVOID] Step 3: Turning back")
 
@@ -369,16 +369,16 @@ class ObstacleAvoidance:
             time.sleep(duration)
             controller.stop()
 
-            self.maneuver_step = 3
+            self.manoeuvre_step = 3
             return True, "TURN", duration
 
-        elif self.maneuver_step == 3:
+        elif self.manoeuvre_step == 3:
 
             print("[AVOID] Step 4: Checking if path is clear")
 
             self.avoiding = False
             self.obstacle_to_avoid = None
-            self.maneuver_step = 0
+            self.manoeuvre_step = 0
 
             return False, "NONE", 0
 
@@ -421,7 +421,7 @@ class RobotController:
         print("Could not connect to Arduino")
         return False
 
-    def send_command(self, cmd: str, log_action=False, color=None, stage="APPROACHING"):
+    def send_command(self, cmd: str, log_action=False, colour=None, stage="APPROACHING"):
 
         if not self.serial:
             return False
@@ -448,32 +448,32 @@ class RobotController:
         self.recording_enabled = False
         print(f"[RECORD] Recorded {len(self.action_log)} actions")
 
-    def forward(self, duration: Optional[float] = None, color: Optional[ObjectColor] = None, stage: str = "APPROACHING"):
-        self.send_command("FORWARD", color=color, stage=stage)
+    def forward(self, duration: Optional[float] = None, colour: Optional[ObjectColour] = None, stage: str = "APPROACHING"):
+        self.send_command("FORWARD", colour=colour, stage=stage)
         if duration:
             time.sleep(duration)
             self.stop()
 
-    def backward(self, duration: Optional[float] = None, color: Optional[ObjectColor] = None, stage: str = "APPROACHING"):
-        self.send_command("BACKWARD", color=color, stage=stage)
+    def backward(self, duration: Optional[float] = None, colour: Optional[ObjectColour] = None, stage: str = "APPROACHING"):
+        self.send_command("BACKWARD", colour=colour, stage=stage)
         if duration:
             time.sleep(duration)
             time.sleep(0.1)
             self.stop()
 
-    def left(self, duration: Optional[float] = None, color: Optional[ObjectColor] = None, stage: str = "APPROACHING"):
-        self.send_command("LEFT", color=color, stage=stage)
+    def left(self, duration: Optional[float] = None, colour: Optional[ObjectColour] = None, stage: str = "APPROACHING"):
+        self.send_command("LEFT", colour=colour, stage=stage)
         if duration:
             time.sleep(duration)
             self.stop()
 
-    def right(self, duration: Optional[float] = None, color: Optional[ObjectColor] = None, stage: str = "APPROACHING"):
-        self.send_command("RIGHT", color=color, stage=stage)
+    def right(self, duration: Optional[float] = None, colour: Optional[ObjectColour] = None, stage: str = "APPROACHING"):
+        self.send_command("RIGHT", colour=colour, stage=stage)
         if duration:
             time.sleep(duration)
             self.stop()
 
-    def log_frame_action(self, action, frame, stage, color=None):
+    def log_frame_action(self, action, frame, stage, colour=None):
 
         if not self.recording_enabled:
             return
@@ -487,20 +487,20 @@ class RobotController:
                 frame=frame,
                 action=action,
                 stage=stage,
-                color=color
+                colour=colour
             )
         )
 
     def stop(self):
         self.send_command("STOP", log_action=False)
 
-    def turn_degrees(self, degrees: float, color: Optional[ObjectColor] = None, stage: str = "APPROACHING"):
+    def turn_degrees(self, degrees: float, colour: Optional[ObjectColour] = None, stage: str = "APPROACHING"):
         if degrees > 0:
             duration = (degrees / 90) * self.config.turn_duration_90deg
-            self.right(duration, color, stage)
+            self.right(duration, colour, stage)
         else:
             duration = (abs(degrees) / 90) * self.config.turn_duration_90deg
-            self.left(duration, color, stage)
+            self.left(duration, colour, stage)
 
     def turn_180(self):
         self.send_command("TURN_180", log_action=False)
@@ -558,11 +558,11 @@ class AutonomousSortingRobot:
         self.motion_config = MotionConfig()
 
         self.camera = None
-        self.detector = ColorDetector(self.detect_config)
+        self.detector = ColourDetector(self.detect_config)
         self.controller = RobotController(self.motion_config)
         self.avoidance = ObstacleAvoidance(self.detect_config, self.motion_config)
 
-        self.mission_sequence = [ObjectColor.BLUE, ObjectColor.RED, ObjectColor.GREEN]
+        self.mission_sequence = [ObjectColour.BLUE, ObjectColour.RED, ObjectColour.GREEN]
         self.current_stage = MissionStage.STARTING
         self.frame_count = 0
         self.log_file = None
@@ -581,9 +581,9 @@ class AutonomousSortingRobot:
 
     def initialize(self):
         print("\n" + "="*60)
-        print("AUTONOMOUS SORTING ROBOT INITIALIZATION")
+        print("AUTONOMOUS SORTING ROBOT INITIALISATION")
         print("="*60)
-        print("Camera is FLIPPED - Color mapping (CALIBRATED):")
+        print("Camera is FLIPPED - Colour mapping (CALIBRATED):")
         print("  Real BLUE   -> appears ORANGE in camera")
         print("  Real RED    -> appears CYAN in camera")
         print("  Real GREEN  -> appears MAGENTA in camera")
@@ -603,12 +603,12 @@ class AutonomousSortingRobot:
         self._setup_logging()
         self._start_ir_reader()
 
-        print("\n[OK] Robot initialized successfully")
+        print("\n[OK] Robot initialised successfully")
         print("="*60 + "\n")
 
     def _init_camera(self):
         try:
-            print("Initializing camera with FLIP (hflip=1, vflip=1)...")
+            print("Initialising camera with FLIP (hflip=1, vflip=1)...")
             self.camera = Picamera2()
 
             transform = Transform(
@@ -636,7 +636,7 @@ class AutonomousSortingRobot:
         self.log_file.write("AUTONOMOUS SORTING ROBOT LOG\n")
         self.log_file.write(f"Started: {datetime.now()}\n")
         self.log_file.write("="*80 + "\n")
-        self.log_file.write("Timestamp,Frame,Stage,Color,Action,X,Y,Area,Distance,Status\n")
+        self.log_file.write("Timestamp,Frame,Stage,Colour,Action,X,Y,Area,Distance,Status\n")
         self.log_file.flush()
         print(f"[OK] Logging to: {log_filename}")
 
@@ -664,7 +664,7 @@ class AutonomousSortingRobot:
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
         if obj:
-            line = f"{timestamp},{self.frame_count},{stage},{obj.color.value},{action},{obj.position[0]},{obj.position[1]},{obj.area:.0f},{obj.distance:.1f},{status}\n"
+            line = f"{timestamp},{self.frame_count},{stage},{obj.colour.value},{action},{obj.position[0]},{obj.position[1]},{obj.area:.0f},{obj.distance:.1f},{status}\n"
         else:
             line = f"{timestamp},{self.frame_count},{stage},none,{action},0,0,0,0,{status}\n"
 
@@ -683,20 +683,20 @@ class AutonomousSortingRobot:
             print(f"Frame capture error: {e}")
             return None
 
-    def find_next_target_color(self) -> Optional[ObjectColor]:
-        for color in self.mission_sequence:
-            already_retrieved = any(obj.color == color for obj in self.retrieved_objects)
+    def find_next_target_colour(self) -> Optional[ObjectColour]:
+        for colour in self.mission_sequence:
+            already_retrieved = any(obj.colour == colour for obj in self.retrieved_objects)
             if not already_retrieved:
-                return color
+                return colour
         return None
 
-    def approach_with_avoidance(self, target_color: ObjectColor) -> bool:
+    def approach_with_avoidance(self, target_colour: ObjectColour) -> bool:
         """
         Approach target while using reactive obstacle avoidance
         Records ALL movements continuously from first detection to grasp
         Lost counter only affects abort decision, NOT recording
         """
-        print(f"\nApproaching {target_color.value} with obstacle avoidance...")
+        print(f"\nApproaching {target_colour.value} with obstacle avoidance...")
         self.current_stage = MissionStage.APPROACHING
 
         # Reset tracking state for new approach
@@ -718,7 +718,7 @@ class AutonomousSortingRobot:
 
             # Process frame and update detection
             self.detector.process_frame(frame)
-            self.detector.set_target_color(target_color)
+            self.detector.set_target_colour(target_colour)
 
             # Check if we have a target
             target_visible = self.detector.target_object is not None
@@ -740,11 +740,11 @@ class AutonomousSortingRobot:
                 movement_count += 1
 
                 # Check for obstacles and avoid if needed
-                if self.avoidance.check_and_avoid(self.detector, self.controller, target_color):
+                if self.avoidance.check_and_avoid(self.detector, self.controller, target_colour):
                     self.current_stage = MissionStage.AVOIDING
-                    # Execute one step of avoidance maneuver with the current frame
-                    still_avoiding, action, duration = self.avoidance.execute_avoidance_maneuver(
-                        self.controller, self.detector, frame, target_color)
+                    # Execute one step of avoidance manoeuvre with the current frame
+                    still_avoiding, action, duration = self.avoidance.execute_avoidance_manoeuvre(
+                        self.controller, self.detector, frame, target_colour)
 
                     if still_avoiding:
                         # Still avoiding, continue loop
@@ -777,7 +777,7 @@ class AutonomousSortingRobot:
                     action,
                     self.frame_count,
                     "APPROACHING",
-                    target_color
+                    target_colour
                 )
 
                 # Only send command when it changes
@@ -804,7 +804,7 @@ class AutonomousSortingRobot:
                             "LEFT",
                             self.frame_count,
                             "SEARCHING",
-                            target_color
+                            target_colour
                         )
 
                         # Execute the search turn
@@ -822,10 +822,10 @@ class AutonomousSortingRobot:
             self.controller.stop_recording()
         return False
 
-    def execute_grasp_sequence(self, target_color: ObjectColor):
+    def execute_grasp_sequence(self, target_colour: ObjectColour):
         """Execute the grasp, return, and release sequence"""
         print("\n" + "="*60)
-        print(f"EXECUTING GRASP SEQUENCE for {target_color.value}")
+        print(f"EXECUTING GRASP SEQUENCE for {target_colour.value}")
         print("="*60)
 
         self.camera_enabled = False
@@ -901,7 +901,7 @@ class AutonomousSortingRobot:
 
             # Mark as retrieved
             retrieved_obj = DetectedObject(
-                color=target_color,
+                colour=target_colour,
                 position=(0,0),
                 area=0,
                 distance=0,
@@ -911,7 +911,7 @@ class AutonomousSortingRobot:
             )
             self.retrieved_objects.append(retrieved_obj)
 
-            print(f"[OK] Successfully retrieved {target_color.value}")
+            print(f"[OK] Successfully retrieved {target_colour.value}")
 
         finally:
             self.camera_enabled = True
@@ -931,12 +931,12 @@ class AutonomousSortingRobot:
             self.current_stage = MissionStage.SCANNING
             print(f"\n--- Scanning for next object ---")
 
-            target_color = self.find_next_target_color()
-            if target_color is None:
-                print("No target color found - mission complete?")
+            target_colour = self.find_next_target_colour()
+            if target_colour is None:
+                print("No target colour found - mission complete?")
                 break
 
-            print(f"Searching for {target_color.value}...")
+            print(f"Searching for {target_colour.value}...")
 
             # Initial search by turning
             found = False
@@ -944,7 +944,7 @@ class AutonomousSortingRobot:
                 frame = self.capture_frame()
                 if frame is not None:
                     self.detector.process_frame(frame)
-                    if self.detector.get_object_by_color(target_color) is not None:
+                    if self.detector.get_object_by_colour(target_colour) is not None:
                         found = True
                         break
 
@@ -953,18 +953,18 @@ class AutonomousSortingRobot:
                 time.sleep(1)
 
             if not found:
-                print(f"ERROR: Could not find {target_color.value} object")
+                print(f"ERROR: Could not find {target_colour.value} object")
                 continue
 
-            print(f"\n[OK] Found {target_color.value}")
+            print(f"\n[OK] Found {target_colour.value}")
 
             # Approach with obstacle avoidance
-            success = self.approach_with_avoidance(target_color)
+            success = self.approach_with_avoidance(target_colour)
 
             if success:
-                self.execute_grasp_sequence(target_color)
+                self.execute_grasp_sequence(target_colour)
             else:
-                print(f"Failed to retrieve {target_color.value}")
+                print(f"Failed to retrieve {target_colour.value}")
                 continue
 
             time.sleep(2)
@@ -975,7 +975,7 @@ class AutonomousSortingRobot:
         print("MISSION COMPLETE!")
         print("="*60)
         print(f"Retrieved: {len(self.retrieved_objects)}/{len(self.mission_sequence)} objects")
-        print(f"Objects: {[obj.color.value for obj in self.retrieved_objects]}")
+        print(f"Objects: {[obj.colour.value for obj in self.retrieved_objects]}")
         print(f"Duration: {mission_duration:.1f} seconds")
         print("="*60)
 
@@ -986,15 +986,15 @@ class AutonomousSortingRobot:
         display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         # Draw all detected objects
-        color_map = {
-            ObjectColor.BLUE: (0, 165, 255),    # Orange
-            ObjectColor.RED: (255, 255, 0),     # Cyan
-            ObjectColor.GREEN: (255, 0, 255)    # Magenta
+        colour_map = {
+            ObjectColour.BLUE: (0, 165, 255),    # Orange
+            ObjectColour.RED: (255, 255, 0),     # Cyan
+            ObjectColour.GREEN: (255, 0, 255)    # Magenta
         }
 
         # Draw safety zones for obstacles (scaled with object size)
         for obj in self.detector.all_objects:
-            color = color_map[obj.color]
+            colour = colour_map[obj.colour]
 
             # Calculate object radius (half of sqrt(area))
             object_radius = self.detector.get_object_radius(obj)
@@ -1013,22 +1013,22 @@ class AutonomousSortingRobot:
             # Draw object itself
             if obj == self.detector.target_object:
                 # Target object - draw thick circle
-                cv2.circle(display, obj.position, object_radius, color, 3)
+                cv2.circle(display, obj.position, object_radius, colour, 3)
                 cv2.circle(display, obj.position, 5, (255, 255, 255), -1)
 
-                camera_color = "orange" if obj.color == ObjectColor.BLUE else "cyan" if obj.color == ObjectColor.RED else "magenta"
-                label = f"TARGET {obj.color.value} ({camera_color}) a:{obj.area:.0f}"
+                camera_colour = "orange" if obj.colour == ObjectColour.BLUE else "cyan" if obj.colour == ObjectColour.RED else "magenta"
+                label = f"TARGET {obj.colour.value} ({camera_colour}) a:{obj.area:.0f}"
                 cv2.putText(display, label, (obj.position[0] - 40, obj.position[1] - 30),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
             else:
                 # Obstacle object
-                cv2.circle(display, obj.position, object_radius, color, 2)
-                cv2.circle(display, obj.position, 3, color, -1)
+                cv2.circle(display, obj.position, object_radius, colour, 2)
+                cv2.circle(display, obj.position, 3, colour, -1)
 
-                camera_color = "orange" if obj.color == ObjectColor.BLUE else "cyan" if obj.color == ObjectColor.RED else "magenta"
-                label = f"{obj.color.value} ({camera_color})"
+                camera_colour = "orange" if obj.colour == ObjectColour.BLUE else "cyan" if obj.colour == ObjectColour.RED else "magenta"
+                label = f"{obj.colour.value} ({camera_colour})"
                 cv2.putText(display, label, (obj.position[0] - 30, obj.position[1] - 20),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, colour, 1)
 
         # Draw start position
         cv2.circle(display, self.start_position, 10, (0, 255, 255), -1)
@@ -1059,11 +1059,11 @@ class AutonomousSortingRobot:
 
         if self.avoidance.avoiding:
             y += 25
-            cv2.putText(display, f"AVOIDING: step {self.avoidance.maneuver_step}", (10, y),
+            cv2.putText(display, f"AVOIDING: step {self.avoidance.manoeuvre_step}", (10, y),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         elif self.detector.target_object:
             y += 25
-            cv2.putText(display, f"Target: {self.detector.target_object.color.value}", (10, y),
+            cv2.putText(display, f"Target: {self.detector.target_object.colour.value}", (10, y),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 1)
 
         # Show approach active status
@@ -1136,7 +1136,7 @@ if __name__ == "__main__":
     print("  1. BLUE object  (appears ORANGE in flipped camera)")
     print("  2. RED object   (appears CYAN in flipped camera)")
     print("  3. GREEN object (appears MAGENTA in flipped camera)")
-    print("\nCALIBRATED COLOR RANGES:")
+    print("\nCALIBRATED COLOUR RANGES:")
     print("  Blue (orange):  H:0-68, S:221-255, V:0-255")
     print("  Red (cyan):     H:122-180, S:170-255, V:107-255")
     print("  Green (magenta): H:25-76 and 76-0, S:60-255, V:19-255")
