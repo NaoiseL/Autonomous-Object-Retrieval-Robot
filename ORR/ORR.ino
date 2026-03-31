@@ -3,7 +3,6 @@
 #include <IRremote.h>
 #include "Server.h"
  
-
 // Lights Configuration
 #define NUM_LEDS 4
 Adafruit_NeoPixel stripA(NUM_LEDS, A13, NEO_GRB + NEO_KHZ800);
@@ -37,9 +36,11 @@ Servo clawServo;
 #define BUZZER_PIN 2
 #define IR_PIN 4/////
 
+#define TURN_180_TIME 1950
+
 // TRACKING POSITION: Necessary for smooth transitions
-int currentTilt = 135; 
 int currentClaw = 170;
+int currentTilt = 100;
 
 String inputString = "";
 bool stringComplete = false;
@@ -56,15 +57,12 @@ decode_results results;
 #define BUTTON_3 0xFFB04F  // Search
 #define BUTTON_4 0xFF30CF  // Party Mode
 
+
+
+
 void setup() {
     Serial.begin(9600);
-    
-    pinMode(IR_SENSOR_PIN, INPUT);
-    pinMode(BUZZER_PIN, OUTPUT);
-    noTone(BUZZER_PIN); // Ensure buzzer is off initially
-    
-    irrecv.enableIRIn(); // Start IR receiver
-    
+
     stripA.begin();
     stripB.begin();
     setStripColor(stripA.Color(0, 0, 0));
@@ -72,7 +70,7 @@ void setup() {
     // IMPORTANT: Attach the servo pin here
         // Attach servos to pins A14 and A15
     tiltServo.attach(A11);
-    clawServo.attach(A15);
+    clawServo.attach(A9);
 
     // Initial neutral positions
     tiltServo.write(currentTilt);
@@ -163,7 +161,8 @@ void executeCommand(String cmd) {
         Serial.println("EXEC: FORWARD");
     }
     else if (cmd == "BACKWARD") {
-        setStripColor(stripA.Color(255, 0, 0)); // Red for reverse
+        setStripColor(stripA.Color(255, 150, 120)); // Red for reverse
+       
         motor1.run(SPEED_BACKWARD);
         motor2.run(-SPEED_BACKWARD);
         motor3.run(SPEED_BACKWARD);
@@ -182,14 +181,14 @@ void executeCommand(String cmd) {
     else if (cmd == "GRASP") {
         Serial.println("EXEC: GRASPING");
         stopMotors();
-        
+        setStripColor(stripA.Color(255, 20, 147));
         
         // 3. Close claw
         smoothMove(clawServo, 55, currentClaw, 10);
         delay(1000);
 
         // 4. Tilt up
-        smoothMove(tiltServo, 110, currentTilt, 10);
+        smoothMove(tiltServo, 120, currentTilt, 10);
         delay(2000);
 
         isGrasping = true;
@@ -197,13 +196,14 @@ void executeCommand(String cmd) {
     }
     else if (cmd == "RELEASE") {
         Serial.println("EXEC: RELEASING");
+        setStripColor(stripA.Color(0, 255, 255));
         
         // 1. Tilt down
-        smoothMove(tiltServo, 140, currentTilt, 10);
+        smoothMove(tiltServo, 100, currentTilt, 10);
         delay(500);
 
         // 2. Open claw
-        smoothMove(clawServo, 170, currentClaw, 15);
+        smoothMove(clawServo, 170, currentClaw, 20);
         delay(500);
                 
         isGrasping = false;
@@ -213,6 +213,7 @@ void executeCommand(String cmd) {
 
     else if (cmd == "TURN_180") {
         Serial.println("EXEC: TURN_180");
+        setStripColor(stripA.Color(128, 0, 128));
         motor1.run(-SPEED_TURN_180);
         motor2.run(-SPEED_TURN_180);
         motor3.run(-SPEED_TURN_180);
@@ -222,16 +223,25 @@ void executeCommand(String cmd) {
         Serial.println("EXEC: TURN_180_COMPLETE");
     }
     else if (cmd == "STOP") {
-        setStripColor(stripA.Color(0, 0, 0)); // Off when stopped
+        setStripColor(stripA.Color(255, 0, 0)); 
         stopMotors();
         tone(BUZZER_PIN, 1000, 200); // Beep once for 200ms
+      
         Serial.println("EXEC: STOP");
+    }
+
+    else if(cmd == "PARTYMODE"){
+        for (int i = 0; i < 10; i++) {
+            setStripColor(stripA.Color(random(255), random(255), random(255)));
+            delay(200);
+        }
     }
 
     else {
         Serial.print("UNKNOWN: ");
         Serial.println(cmd);
     }
+
 }
 
 void stopMotors() {
@@ -297,5 +307,3 @@ void updatePartyMode() {
         lastUpdate = currentTime;
     }
 }
-
-
