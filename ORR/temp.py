@@ -35,9 +35,9 @@ class CameraConfig:
 
 @dataclass
 class DetectionConfig:
-    min_blob_area: int = 5000
+    min_blob_area: int = 1000
     calib_k: float = 42459450
-    grasp_area_threshold: int = 115000
+    grasp_area_threshold: int = 95000
     obstacle_safety_margin: int = 30  # Additional pixels beyond object radius
     max_lost_frames: int = 30  # Maximum frames without target before aborting
 
@@ -439,10 +439,9 @@ class RobotController:
                 return False
 
     def start_recording(self):
+        self.action_log = []
         self.recording_enabled = True
-        if not self.action_log:
-            self.action_log = []
-        print("\n[RECORD] Started recording movements")
+        print("\n[RECORD] Started recording movements (new object)")
 
     def stop_recording(self):
         self.recording_enabled = False
@@ -529,6 +528,12 @@ class RobotController:
         for i in range(len(return_path)):
             record = return_path[i]
             action = record.action
+
+            # Swap LEFT and RIGHT when reversing
+            if action == "LEFT":
+                action = "RIGHT"
+            elif action == "RIGHT":
+                action = "LEFT"
 
             print(f"Return {i+1}/{len(return_path)}: {action}")
 
@@ -659,6 +664,8 @@ class AutonomousSortingRobot:
 
     def log_event(self, stage: str, action: str = "", obj: Optional[DetectedObject] = None, status: str = ""):
         if not self.log_file:
+
+
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -710,6 +717,9 @@ class AutonomousSortingRobot:
         recording_started = False
         search_turn_counter = 0
 
+        out_of_centre_movement = False  # NEW: tracks if object has moved out of centre
+        centre_aligned_once = False      # NEW: tracks first centre alignment
+
         while self.lost_counter < self.detect_config.max_lost_frames:
             frame = self.capture_frame()
             if frame is None:
@@ -742,15 +752,12 @@ class AutonomousSortingRobot:
                 # Check for obstacles and avoid if needed
                 if self.avoidance.check_and_avoid(self.detector, self.controller, target_colour):
                     self.current_stage = MissionStage.AVOIDING
-                    # Execute one step of avoidance manoeuvre with the current frame
                     still_avoiding, action, duration = self.avoidance.execute_avoidance_manoeuvre(
                         self.controller, self.detector, frame, target_colour)
 
                     if still_avoiding:
-                        # Still avoiding, continue loop
                         continue
                     else:
-                        # Path clear, resume approaching
                         self.current_stage = MissionStage.APPROACHING
                         continue
 
@@ -771,18 +778,26 @@ class AutonomousSortingRobot:
                     self.controller.stop()
                     return True
 
+                if target_visible:
+                    x = self.detector.target_object.position[0]
+                    centre_left = self.detector.frame_width * 20 // 100
+                    centre_right = self.detector.frame_width * 80 // 100
 
-                # Log EVERY frame movement (this is the important part)
-                self.controller.log_frame_action(
-                    action,
-                    self.frame_count,
-                    "APPROACHING",
-                    target_colour
-                )
+                    if centre_left <= x <= centre_right:
+                        centre_aligned_once = True
+                        out_of_centre_movement = False
 
-                # Only send command when it changes
-                if action != self.controller.last_command:
-                    self.controller.send_command(action)
+                    if centre_aligned_once:
+                        self.controller.log_frame_action(
+                            action,
+                            self.frame_count,
+                            "APPROACHING",
+                            target_colour
+                        )
+
+                    # Only send command when it changes
+                    if action != self.controller.last_command:
+                        self.controller.send_command(action)
 
                 time.sleep(1 / self.cam_config.fps)
 
@@ -794,22 +809,10 @@ class AutonomousSortingRobot:
                     print(f"  Recorded {len(self.controller.action_log)} movements so far")
 
                     # Even though target is lost, we should still move in a search pattern
-                    # These search movements are recorded too (IMPORTANT: recording continues)
                     search_turn_counter += 1
                     if search_turn_counter % 3 == 0:
-                        print("  Searching for target - recording search movement")
-
-                        # Log search movement
-                        self.controller.log_frame_action(
-                            "LEFT",
-                            self.frame_count,
-                            "SEARCHING",
-                            target_colour
-                        )
-
-                        # Execute the search turn
+                        print("  Searching for target")
                         self.controller.turn_degrees(15)
-
                         self.current_stage = MissionStage.SEARCHING
                 else:
                     # Haven't seen target yet this approach
@@ -853,6 +856,7 @@ class AutonomousSortingRobot:
             return_path_copy = list(self.controller.action_log)
 
             print("Performing 180deg turn...")
+            time.sleep(1)
             self.controller.turn_180()
 
             # Restore the recorded path (ensures it wasn't modified)
@@ -864,7 +868,6 @@ class AutonomousSortingRobot:
 
             if len(self.retrieved_objects) >= 1:
                 print("Repositioning for next search...")
-                self.controller.turn_180()
                 self.controller.forward(self.motion_config.backup_duration)
 
             print("\nReached starting position - STOPPING")
