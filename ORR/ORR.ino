@@ -1,5 +1,6 @@
 #include "MeMegaPi.h"
 #include <Adafruit_NeoPixel.h>
+#include <IRremote.h>
 #include "Server.h"
  
 
@@ -32,6 +33,9 @@ Servo clawServo;
 #define SERVO_CCW 0        // Open speed
 #define ACTION_TIME 200   // Time to spin for full grip/release
 #define TURN_180_TIME 1800
+#define IR_SENSOR_PIN A12
+#define BUZZER_PIN 2
+#define IR_PIN 4/////
 
 // TRACKING POSITION: Necessary for smooth transitions
 int currentTilt = 135; 
@@ -40,9 +44,26 @@ int currentClaw = 170;
 String inputString = "";
 bool stringComplete = false;
 bool isGrasping = false;
+bool partyMode = false;
+
+// IR Receiver
+IRrecv irrecv(IR_PIN);
+decode_results results;
+
+// IR Remote Codes (NEC format - replace with your remote's codes)
+#define BUTTON_1 0xFF6897  // Grasp
+#define BUTTON_2 0xFF9867  // Release
+#define BUTTON_3 0xFFB04F  // Search
+#define BUTTON_4 0xFF30CF  // Party Mode
 
 void setup() {
     Serial.begin(9600);
+    
+    pinMode(IR_SENSOR_PIN, INPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    noTone(BUZZER_PIN); // Ensure buzzer is off initially
+    
+    irrecv.enableIRIn(); // Start IR receiver
     
     stripA.begin();
     stripB.begin();
@@ -62,6 +83,17 @@ void setup() {
 }
 
 void loop() {
+    // Handle IR remote input
+    if (irrecv.decode(&results)) {
+        handleIR(results.value);
+        irrecv.resume();
+    }
+    
+    // Handle party mode LED effects
+    if (partyMode) {
+        updatePartyMode();
+    }
+    
     while (Serial.available()) {
         char inChar = (char)Serial.read();
         if (inChar == '\n') {
@@ -77,6 +109,12 @@ void loop() {
         inputString = "";
         stringComplete = false;
     }
+    
+    // IR sensor fail-safe
+    if (digitalRead(IR_SENSOR_PIN) == LOW && !isGrasping) {
+        executeCommand("GRASP");
+    }
+    
     delay(5);
 }
 
@@ -130,6 +168,7 @@ void executeCommand(String cmd) {
         motor2.run(-SPEED_BACKWARD);
         motor3.run(SPEED_BACKWARD);
         motor4.run(-SPEED_BACKWARD);
+        tone(BUZZER_PIN, 1000); // Continuous beep while reversing
         Serial.println("EXEC: BACKWARD");
     }
     else if (cmd == "SEARCH") {
@@ -185,6 +224,7 @@ void executeCommand(String cmd) {
     else if (cmd == "STOP") {
         setStripColor(stripA.Color(0, 0, 0)); // Off when stopped
         stopMotors();
+        tone(BUZZER_PIN, 1000, 200); // Beep once for 200ms
         Serial.println("EXEC: STOP");
     }
 
@@ -199,6 +239,63 @@ void stopMotors() {
     motor2.stop();
     motor3.stop();
     motor4.stop();
+    noTone(BUZZER_PIN); // Stop buzzer when motors stop
+}
+
+void handleIR(unsigned long value) {
+    switch (value) {
+        case BUTTON_1:
+            executeCommand("GRASP");
+            break;
+        case BUTTON_2:
+            executeCommand("RELEASE");
+            break;
+        case BUTTON_3:
+            executeCommand("SEARCH");
+            break;
+        case BUTTON_4:
+            partyMode = !partyMode;
+            if (!partyMode) {
+                setStripColor(stripA.Color(0, 0, 0)); // Turn off LEDs when exiting party mode
+            }
+            break;
+        default:
+            // Unknown button, pause movement
+            executeCommand("STOP");
+            break;
+    }
+}
+
+void updatePartyMode() {
+    static unsigned long lastUpdate = 0;
+    static int colorIndex = 0;
+    static int tiltDirection = 1;
+    unsigned long currentTime = millis();
+    
+    if (currentTime - lastUpdate > 200) { // Update every 200ms
+        uint32_t colors[] = {
+            stripA.Color(255, 0, 0),   // Red
+            stripA.Color(0, 255, 0),   // Green
+            stripA.Color(0, 0, 255),   // Blue
+            stripA.Color(255, 255, 0), // Yellow
+            stripA.Color(255, 0, 255), // Magenta
+            stripA.Color(0, 255, 255)  // Cyan
+        };
+
+        
+        setStripColor(colors[colorIndex]);
+        colorIndex = (colorIndex + 1) % 6;
+        
+        // Move tilt servo up and down
+        currentTilt += tiltDirection * 5;
+        if (currentTilt >= 140 || currentTilt <= 110) {
+            tiltDirection = -tiltDirection;
+            currentTilt = constrain(currentTilt, 110, 140);
+        }
+        tiltServo.write(currentTilt);
+        
+        lastUpdate = currentTime;
+    }
 }
 
 
