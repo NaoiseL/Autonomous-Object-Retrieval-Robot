@@ -20,6 +20,8 @@ from typing import List, Tuple, Dict, Optional, Any
 from datetime import datetime
 from picamera2 import Picamera2
 from libcamera import Transform
+import time
+
 
 from server import start_server
 from discovery import broadcast_presence
@@ -132,6 +134,8 @@ class ColorDetector:
         self.target_first_detected = False  # Flag to track if we've ever seen the target
         self.frame_count = 0
         self.frame_width = CameraConfig().width
+        self.position = [0, 0]
+        self.angle = 0
 
     def process_frame(self, frame_rgb: np.ndarray) -> List[DetectedObject]:
         self.frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
@@ -424,6 +428,25 @@ class RobotController:
 
         print("Could not connect to Arduino")
         return False
+    
+    
+
+    def update_position(self, action):
+        step = 1  # distance per move
+
+        if action == "FORWARD":
+            self.position[0] += step * math.cos(math.radians(self.angle))
+            self.position[1] += step * math.sin(math.radians(self.angle))
+
+        elif action == "BACKWARD":
+            self.position[0] -= step * math.cos(math.radians(self.angle))
+            self.position[1] -= step * math.sin(math.radians(self.angle))
+
+        elif action == "LEFT":
+            self.angle -= 10
+
+        elif action == "RIGHT":
+            self.angle += 10
 
     def send_command(self, cmd: str, log_action=False, color=None, stage="APPROACHING"):
 
@@ -610,39 +633,65 @@ class AutonomousSortingRobot:
         print("\n[OK] Robot initialized successfully")
         print("="*60 + "\n")
 
-    def _init_camera(self):
-        try:
-            print("Initializing camera with FLIP (hflip=1, vflip=1)...")
-            self.camera = Picamera2()
+def _init_camera(self):
+    try:
+        print("Initializing camera...")
 
-            transform = Transform(
-                hflip=1 if self.cam_config.hflip else 0,
-                vflip=1 if self.cam_config.vflip else 0
-            )
-
-            config = self.camera.create_video_configuration(
-                main={"size": (self.cam_config.width, self.cam_config.height),
-                      "format": "RGB888"},
-                transform=transform
-            )
-            self.camera.configure(config)
-            self.camera.start()
-            time.sleep(2)
-            print(f"[OK] Camera started (flipped)")
-        except Exception as e:
-            print(f"[ERROR] Camera init error: {e}")
+        cameras = Picamera2.global_camera_info()
+        if not cameras:
+            print("[ERROR] No camera detected")
             self.camera = None
+            return
 
-    def _setup_logging(self):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"/home/pi/Documents/Logs/autonomous_sorting_{timestamp}.txt"
-        self.log_file = open(log_filename, "w")
-        self.log_file.write("AUTONOMOUS SORTING ROBOT LOG\n")
-        self.log_file.write(f"Started: {datetime.now()}\n")
-        self.log_file.write("="*80 + "\n")
-        self.log_file.write("Timestamp,Frame,Stage,Color,Action,X,Y,Area,Distance,Status\n")
-        self.log_file.flush()
-        print(f"[OK] Logging to: {log_filename}")
+        self.camera = Picamera2()
+
+        transform = Transform(
+            hflip=1 if self.cam_config.hflip else 0,
+            vflip=1 if self.cam_config.vflip else 0
+        )
+
+        config = self.camera.create_video_configuration(
+            main={
+                "size": (self.cam_config.width, self.cam_config.height),
+                "format": "RGB888"
+            },
+            transform=transform
+        )
+
+        self.camera.configure(config)
+        self.camera.start()
+        time.sleep(2)
+
+        print("[OK] Camera started successfully")
+
+    except Exception as e:
+        print(f"[ERROR] Camera init error: {e}")
+        self.camera = None
+
+def _setup_logging(self):
+    import os
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Create Logs directory in user's home folder (works for any username)
+    log_dir = os.path.expanduser("~/Documents/Logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create full file path
+    log_filename = os.path.join(log_dir, f"autonomous_sorting_{timestamp}.txt")
+
+    # Open file
+    self.log_file = open(log_filename, "w")
+
+    # Write header
+    self.log_file.write("AUTONOMOUS SORTING ROBOT LOG\n")
+    self.log_file.write(f"Started: {datetime.now()}\n")
+    self.log_file.write("="*80 + "\n")
+    self.log_file.write("Timestamp,Frame,Stage,Color,Action,X,Y,Area,Distance,Status\n")
+    self.log_file.flush()
+
+    print(f"[OK] Logging to: {log_filename}")
 
     def _start_ir_reader(self):
         def ir_reader():
@@ -783,6 +832,22 @@ class AutonomousSortingRobot:
                     "APPROACHING",
                     target_color
                 )
+
+                self.update_position(action)
+
+                # Send to dashboard
+                socketio.emit("position", {
+                    "x": self.position[0],
+                    "y": self.position[1],
+                    "angle": self.angle
+                })
+
+                # Send telemetry
+                socketio.emit("telemetry", {
+                    "distance": obj.distance if obj else 0,
+                    "area": obj.area if obj else 0,
+                    "frame": self.frame_count
+                })
 
                 # Only send command when it changes
                 if action != self.controller.last_command:
@@ -1100,10 +1165,10 @@ class AutonomousSortingRobot:
                     # Update detection for display
                     self.detector.process_frame(frame)
                     display = self.create_debug_display(frame)
-                    cv2.imshow("Autonomous Sorting Robot", display)
+                    #cv2.imshow("Autonomous Sorting Robot", display)
 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+                #if cv2.waitKey(1) & 0xFF == ord('q'):
+                    #break
 
                 time.sleep(0.03)
 
