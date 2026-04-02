@@ -35,9 +35,9 @@ class CameraConfig:
 
 @dataclass
 class DetectionConfig:
-    min_blob_area: int = 1000
+    min_blob_area: int = 500
     calib_k: float = 42459450
-    grasp_area_threshold: int = 95000
+    grasp_area_threshold: int = 93000
     obstacle_safety_margin: int = 30  # Additional pixels beyond object radius
     max_lost_frames: int = 30  # Maximum frames without target before aborting
 
