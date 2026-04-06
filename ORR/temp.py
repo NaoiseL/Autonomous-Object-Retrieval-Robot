@@ -422,9 +422,11 @@ class RobotController:
         return False
 
     def send_command(self, cmd: str, log_action=False, color=None, stage="APPROACHING"):
-
-        if not self.serial:
+        self.last_sent_time = 0
+        
+        if time.time() - self.last_sent_time < 0.1:
             return False
+        self.last_sent_time = time.time()
 
         with self.command_lock:
             try:

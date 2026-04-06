@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_socketio import SocketIO, emit
 import threading
 import cv2
@@ -9,7 +9,8 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 robot = None
-
+manual_mode = False
+mission_running = False
 
 # =========================
 # AUTH
@@ -65,10 +66,25 @@ def on_connect():
 
 @socketio.on('command')
 def on_command(data):
-    cmd = data.get("cmd")
-    execute(cmd)
-    emit("ack", {"cmd": cmd})
+    global manual_mode
 
+    cmd = data.get("cmd")
+
+    if cmd == "MANUAL_ON":
+        manual_mode = True
+        robot.controller.stop()
+        print("[MODE] Manual override ENABLED")
+
+    elif cmd == "MANUAL_OFF":
+        manual_mode = False
+        print("[MODE] Autonomous mode RESUMED")
+
+    else:
+        # Only allow movement if manual mode is ON
+        if manual_mode:
+            execute(cmd)
+
+    emit("ack", {"cmd": cmd, "manual": manual_mode})
 
 # =========================
 # COMMAND HANDLER
@@ -77,8 +93,16 @@ def execute(cmd):
     print(f"[CMD] {cmd}")
 
     if cmd == "START":
-        threading.Thread(target=robot.run_autonomous_mission).start()
+        if not manual_mode and not mission_running:
+            mission_running = True
 
+            def run():
+                robot.run_autonomous_mission()
+                global mission_running
+                mission_running = False
+
+            threading.Thread(target=run).start()
+            
     elif cmd == "LEFT":
         robot.controller.left()
 

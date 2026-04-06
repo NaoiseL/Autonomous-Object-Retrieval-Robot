@@ -20,12 +20,17 @@ from typing import List, Tuple, Dict, Optional, Any
 from datetime import datetime
 from picamera2 import Picamera2
 from libcamera import Transform
-import time
+import signal
+import sys
 
 
-from server import start_server
-from discovery import broadcast_presence
-import threading
+try:
+    from server import start_server, manual_mode
+    from discovery import broadcast_presence
+    socketio = None  # Will be initialized by server
+except ImportError:
+    socketio = None
+    print("Server modules not available - running without dashboard")
 
 # ============================================================================
 # CONFIGURATION
@@ -41,9 +46,9 @@ class CameraConfig:
 
 @dataclass
 class DetectionConfig:
-    min_blob_area: int = 5000
+    min_blob_area: int = 500
     calib_k: float = 42459450
-    grasp_area_threshold: int = 115000
+    grasp_area_threshold: int = 93000
     obstacle_safety_margin: int = 30  # Additional pixels beyond object radius
     max_lost_frames: int = 30  # Maximum frames without target before aborting
 
@@ -134,8 +139,6 @@ class ColorDetector:
         self.target_first_detected = False  # Flag to track if we've ever seen the target
         self.frame_count = 0
         self.frame_width = CameraConfig().width
-        self.position = [0, 0]
-        self.angle = 0
 
     def process_frame(self, frame_rgb: np.ndarray) -> List[DetectedObject]:
         self.frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
@@ -402,6 +405,8 @@ class RobotController:
         self.command_lock = threading.Lock()
         self.action_log = []  # Continuous log from first detection to grasp
         self.recording_enabled = False  # Whether we're currently recording
+        self.position = [0, 0]
+        self.angle = 0
 
     def connect(self, port: str = None) -> bool:
         if port:
@@ -428,8 +433,6 @@ class RobotController:
 
         print("Could not connect to Arduino")
         return False
-    
-    
 
     def update_position(self, action):
         step = 1  # distance per move
@@ -466,10 +469,9 @@ class RobotController:
                 return False
 
     def start_recording(self):
+        self.action_log = []
         self.recording_enabled = True
-        if not self.action_log:
-            self.action_log = []
-        print("\n[RECORD] Started recording movements")
+        print("\n[RECORD] Started recording movements (new object)")
 
     def stop_recording(self):
         self.recording_enabled = False
@@ -557,6 +559,12 @@ class RobotController:
             record = return_path[i]
             action = record.action
 
+            # Swap LEFT and RIGHT when reversing
+            if action == "LEFT":
+                action = "RIGHT"
+            elif action == "RIGHT":
+                action = "LEFT"
+
             print(f"Return {i+1}/{len(return_path)}: {action}")
 
             # Start movement
@@ -569,8 +577,6 @@ class RobotController:
                 delay = frame_diff / fps
             else:
                 delay = 0.3
-
-
 
         print("\nReturn sequence complete")
 
@@ -608,7 +614,7 @@ class AutonomousSortingRobot:
 
     def initialize(self):
         print("\n" + "="*60)
-        print("AUTONOMOUS SORTING ROBOT INITIALIZATION")
+        print("AUTONOMOUS SORTING ROBOT INITIALISATION")
         print("="*60)
         print("Camera is FLIPPED - Color mapping (CALIBRATED):")
         print("  Real BLUE   -> appears ORANGE in camera")
@@ -630,68 +636,42 @@ class AutonomousSortingRobot:
         self._setup_logging()
         self._start_ir_reader()
 
-        print("\n[OK] Robot initialized successfully")
+        print("\n[OK] Robot initialised successfully")
         print("="*60 + "\n")
 
-def _init_camera(self):
-    try:
-        print("Initializing camera...")
+    def _init_camera(self):
+        try:
+            print("Initialising camera with FLIP (hflip=1, vflip=1)...")
+            self.camera = Picamera2()
 
-        cameras = Picamera2.global_camera_info()
-        if not cameras:
-            print("[ERROR] No camera detected")
+            transform = Transform(
+                hflip=1 if self.cam_config.hflip else 0,
+                vflip=1 if self.cam_config.vflip else 0
+            )
+
+            config = self.camera.create_video_configuration(
+                main={"size": (self.cam_config.width, self.cam_config.height),
+                      "format": "RGB888"},
+                transform=transform
+            )
+            self.camera.configure(config)
+            self.camera.start()
+            time.sleep(2)
+            print(f"[OK] Camera started (flipped)")
+        except Exception as e:
+            print(f"[ERROR] Camera init error: {e}")
             self.camera = None
-            return
 
-        self.camera = Picamera2()
-
-        transform = Transform(
-            hflip=1 if self.cam_config.hflip else 0,
-            vflip=1 if self.cam_config.vflip else 0
-        )
-
-        config = self.camera.create_video_configuration(
-            main={
-                "size": (self.cam_config.width, self.cam_config.height),
-                "format": "RGB888"
-            },
-            transform=transform
-        )
-
-        self.camera.configure(config)
-        self.camera.start()
-        time.sleep(2)
-
-        print("[OK] Camera started successfully")
-
-    except Exception as e:
-        print(f"[ERROR] Camera init error: {e}")
-        self.camera = None
-
-def _setup_logging(self):
-    import os
-    from datetime import datetime
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # Create Logs directory in user's home folder (works for any username)
-    log_dir = os.path.expanduser("~/Documents/Logs")
-    os.makedirs(log_dir, exist_ok=True)
-
-    # Create full file path
-    log_filename = os.path.join(log_dir, f"autonomous_sorting_{timestamp}.txt")
-
-    # Open file
-    self.log_file = open(log_filename, "w")
-
-    # Write header
-    self.log_file.write("AUTONOMOUS SORTING ROBOT LOG\n")
-    self.log_file.write(f"Started: {datetime.now()}\n")
-    self.log_file.write("="*80 + "\n")
-    self.log_file.write("Timestamp,Frame,Stage,Color,Action,X,Y,Area,Distance,Status\n")
-    self.log_file.flush()
-
-    print(f"[OK] Logging to: {log_filename}")
+    def _setup_logging(self):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"/home/pi/Documents/Logs/autonomous_sorting_{timestamp}.txt"
+        self.log_file = open(log_filename, "w")
+        self.log_file.write("AUTONOMOUS SORTING ROBOT LOG\n")
+        self.log_file.write(f"Started: {datetime.now()}\n")
+        self.log_file.write("="*80 + "\n")
+        self.log_file.write("Timestamp,Frame,Stage,Color,Action,X,Y,Area,Distance,Status\n")
+        self.log_file.flush()
+        print(f"[OK] Logging to: {log_filename}")
 
     def _start_ir_reader(self):
         def ir_reader():
@@ -749,6 +729,7 @@ def _setup_logging(self):
         Records ALL movements continuously from first detection to grasp
         Lost counter only affects abort decision, NOT recording
         """
+
         print(f"\nApproaching {target_color.value} with obstacle avoidance...")
         self.current_stage = MissionStage.APPROACHING
 
@@ -765,6 +746,11 @@ def _setup_logging(self):
 
         while self.lost_counter < self.detect_config.max_lost_frames:
             frame = self.capture_frame()
+            if manual_mode:
+                self.controller.stop()
+                time.sleep(0.1)
+                continue
+
             if frame is None:
                 time.sleep(1 / self.cam_config.fps)
                 continue
@@ -795,15 +781,12 @@ def _setup_logging(self):
                 # Check for obstacles and avoid if needed
                 if self.avoidance.check_and_avoid(self.detector, self.controller, target_color):
                     self.current_stage = MissionStage.AVOIDING
-                    # Execute one step of avoidance maneuver with the current frame
                     still_avoiding, action, duration = self.avoidance.execute_avoidance_maneuver(
                         self.controller, self.detector, frame, target_color)
 
                     if still_avoiding:
-                        # Still avoiding, continue loop
                         continue
                     else:
-                        # Path clear, resume approaching
                         self.current_stage = MissionStage.APPROACHING
                         continue
 
@@ -824,8 +807,7 @@ def _setup_logging(self):
                     self.controller.stop()
                     return True
 
-
-                # Log EVERY frame movement (this is the important part)
+                # Log frame action
                 self.controller.log_frame_action(
                     action,
                     self.frame_count,
@@ -833,21 +815,22 @@ def _setup_logging(self):
                     target_color
                 )
 
-                self.update_position(action)
+                self.controller.update_position(action)
 
                 # Send to dashboard
-                socketio.emit("position", {
-                    "x": self.position[0],
-                    "y": self.position[1],
-                    "angle": self.angle
-                })
+                if socketio:
+                    socketio.emit("position", {
+                        "x": self.controller.position[0],
+                        "y": self.controller.position[1],
+                        "angle": self.controller.angle
+                    })
 
-                # Send telemetry
-                socketio.emit("telemetry", {
-                    "distance": obj.distance if obj else 0,
-                    "area": obj.area if obj else 0,
-                    "frame": self.frame_count
-                })
+                    # Send telemetry
+                    socketio.emit("telemetry", {
+                        "distance": obj.distance if obj else 0,
+                        "area": obj.area if obj else 0,
+                        "frame": self.frame_count
+                    })
 
                 # Only send command when it changes
                 if action != self.controller.last_command:
@@ -863,22 +846,10 @@ def _setup_logging(self):
                     print(f"  Recorded {len(self.controller.action_log)} movements so far")
 
                     # Even though target is lost, we should still move in a search pattern
-                    # These search movements are recorded too (IMPORTANT: recording continues)
                     search_turn_counter += 1
                     if search_turn_counter % 3 == 0:
-                        print("  Searching for target - recording search movement")
-
-                        # Log search movement
-                        self.controller.log_frame_action(
-                            "LEFT",
-                            self.frame_count,
-                            "SEARCHING",
-                            target_color
-                        )
-
-                        # Execute the search turn
+                        print("  Searching for target")
                         self.controller.turn_degrees(15)
-
                         self.current_stage = MissionStage.SEARCHING
                 else:
                     # Haven't seen target yet this approach
@@ -922,6 +893,7 @@ def _setup_logging(self):
             return_path_copy = list(self.controller.action_log)
 
             print("Performing 180deg turn...")
+            time.sleep(1)
             self.controller.turn_180()
 
             # Restore the recorded path (ensures it wasn't modified)
@@ -933,7 +905,6 @@ def _setup_logging(self):
 
             if len(self.retrieved_objects) >= 1:
                 print("Repositioning for next search...")
-                self.controller.turn_180()
                 self.controller.forward(self.motion_config.backup_duration)
 
             print("\nReached starting position - STOPPING")
@@ -999,6 +970,11 @@ def _setup_logging(self):
         while len(self.retrieved_objects) < len(self.mission_sequence):
             self.current_stage = MissionStage.SCANNING
             print(f"\n--- Scanning for next object ---")
+            
+            if manual_mode:
+                print("[PAUSED] Manual override active")
+                time.sleep(0.5)
+                continue
 
             target_color = self.find_next_target_color()
             if target_color is None:
@@ -1159,7 +1135,8 @@ def _setup_logging(self):
             cv2.namedWindow("Autonomous Sorting Robot", cv2.WINDOW_NORMAL)
             cv2.resizeWindow("Autonomous Sorting Robot", 800, 600)
 
-            while True:
+            self.running = True
+            while self.running:
                 frame = self.capture_frame()
                 if frame is not None:
                     # Update detection for display
@@ -1168,7 +1145,7 @@ def _setup_logging(self):
                     #cv2.imshow("Autonomous Sorting Robot", display)
 
                 #if cv2.waitKey(1) & 0xFF == ord('q'):
-                    #break
+                 #   break
 
                 time.sleep(0.03)
 
@@ -1179,6 +1156,8 @@ def _setup_logging(self):
 
     def cleanup(self):
         print("\nCleaning up...")
+        self.running = False 
+
         self.controller.stop()
         if self.controller.serial:
             self.controller.serial.close()
@@ -1189,13 +1168,22 @@ def _setup_logging(self):
             self.log_file.close()
         print("Cleanup complete")
 
+def shutdown_handler(signum, frame):
+    print("\n[SHUTDOWN] Cleaning up safely...")
+    try:
+        robot.cleanup()
+    except:
+        pass
+    sys.exit(0)
+
 # ============================================================================
 # MAIN
 # ============================================================================
 
+
 if __name__ == "__main__":
     os.system("sudo pkill -9 -f python3 2>/dev/null")
-    os.system("sudo pkill -9 -f picamera 2>/dev/null")
+    os.system("sudo pkill -9 -f picamera2>/dev/null")
     time.sleep(1)
 
     print("\n" + "="*60)
@@ -1205,10 +1193,10 @@ if __name__ == "__main__":
     print("  1. BLUE object  (appears ORANGE in flipped camera)")
     print("  2. RED object   (appears CYAN in flipped camera)")
     print("  3. GREEN object (appears MAGENTA in flipped camera)")
-    print("\nCALIBRATED COLOR RANGES:")
-    print("  Blue (orange):  H:0-68, S:221-255, V:0-255")
-    print("  Red (cyan):     H:122-180, S:170-255, V:107-255")
-    print("  Green (magenta): H:25-76 and 76-0, S:60-255, V:19-255")
+    print("\nCALIBRATED COLOUR RANGES:")
+    print("  Blue (orange):  H:0-16, S:152-255, V:49-255")
+    print("  Red (cyan):     H:111-180, S:130-255, V:0-255")
+    print("  Green (magenta): H:45-89 and 180+, S:107-255, V:0-255")
     print(f"\nGrasp trigger: area > {DetectionConfig.grasp_area_threshold} pixels")
     print(f"Min blob area: {DetectionConfig.min_blob_area}")
     print(f"Obstacle safety margin: {DetectionConfig.obstacle_safety_margin} pixels")
@@ -1218,9 +1206,14 @@ if __name__ == "__main__":
 
     robot = AutonomousSortingRobot()
 
+    # REGISTER SIGNAL HANDLERS HERE
+    signal.signal(signal.SIGINT, shutdown_handler)   # Ctrl+C
+    signal.signal(signal.SIGTERM, shutdown_handler)  # kill command
+
     #start server
     threading.Thread(target=start_server, args=(robot,), daemon=True).start()
 
     #start discovery broadcast
     threading.Thread(target=broadcast_presence, daemon=True).start()
+
     robot.run()
