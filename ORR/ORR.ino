@@ -28,12 +28,8 @@ MeMegaPiDCMotor motor4(PORT2B);
 Servo tiltServo;
 Servo clawServo;
 
-#define SERVO_STOP 90      // Neutral (Adjust to 88-92 if it creeps)
-#define SERVO_CW 180       // Close speed
-#define SERVO_CCW 0        // Open speed
-#define ACTION_TIME 200   // Time to spin for full grip/release
-#define TURN_180_TIME 1800
-#define IR_SENSOR_PIN A12
+#define TURN_180_TIME 1925
+
 #define BUZZER_PIN 2
 #define IR_PIN 4/////
 
