@@ -1,6 +1,5 @@
 #include "MeMegaPi.h"
 #include <Adafruit_NeoPixel.h>
-#include <IRremote.h>
 #include "Server.h"
  
 // Lights Configuration
@@ -45,11 +44,8 @@ int currentTilt = 100;
 String inputString = "";
 bool stringComplete = false;
 bool isGrasping = false;
-bool partyMode = false;
 
-// IR Receiver
-IRrecv irrecv(IR_PIN);
-decode_results results;
+
 
 // IR Remote Codes (NEC format - replace with your remote's codes)
 #define BUTTON_1 0xFF6897  // Grasp
@@ -81,17 +77,6 @@ void setup() {
 }
 
 void loop() {
-    // Handle IR remote input
-    if (irrecv.decode(&results)) {
-        handleIR(results.value);
-        irrecv.resume();
-    }
-    
-    // Handle party mode LED effects
-    if (partyMode) {
-        updatePartyMode();
-    }
-    
     while (Serial.available()) {
         char inChar = (char)Serial.read();
         if (inChar == '\n') {
@@ -107,12 +92,6 @@ void loop() {
         inputString = "";
         stringComplete = false;
     }
-    
-    // IR sensor fail-safe
-    if (digitalRead(IR_SENSOR_PIN) == LOW && !isGrasping) {
-        executeCommand("GRASP");
-    }
-    
     delay(5);
 }
 
@@ -167,7 +146,6 @@ void executeCommand(String cmd) {
         motor2.run(-SPEED_BACKWARD);
         motor3.run(SPEED_BACKWARD);
         motor4.run(-SPEED_BACKWARD);
-        tone(BUZZER_PIN, 1000); // Continuous beep while reversing
         Serial.println("EXEC: BACKWARD");
     }
     else if (cmd == "SEARCH") {
