@@ -35,9 +35,9 @@ class CameraConfig:
 
 @dataclass
 class DetectionConfig:
-    min_blob_area: int = 5000
+    min_blob_area: int = 1000
     calib_k: float = 42459450
-    grasp_area_threshold: int = 115000
+    grasp_area_threshold: int = 105000
     obstacle_safety_margin: int = 30  # Additional pixels beyond object radius
     max_lost_frames: int = 30  # Maximum frames without target before aborting
 
@@ -64,7 +64,7 @@ class MotionConfig:
     forward_speed: int = 150
     turn_speed: int = 200
     turn_duration_90deg: float = 0.4
-    turn_duration_180deg: float = 2.0          # Increased from 0.8 to match Arduino's 1.8s turn + margin
+    turn_duration_180deg: float = 2.4         # Increased from 0.8 to match Arduino's 1.8s turn + margin
     approach_speed: int = 100
     final_approach_duration: float = 0.5
     backup_duration: float = 0.5
@@ -421,12 +421,10 @@ class RobotController:
         print("Could not connect to Arduino")
         return False
 
-    def send_command(self, cmd: str, log_action=False, color=None, stage="APPROACHING"):
-        self.last_sent_time = 0
-        
-        if time.time() - self.last_sent_time < 0.1:
+    def send_command(self, cmd: str, log_action=False, colour=None, stage="APPROACHING"):
+
+        if not self.serial:
             return False
-        self.last_sent_time = time.time()
 
         with self.command_lock:
             try:
@@ -528,24 +526,25 @@ class RobotController:
         return_path = list(reversed(self.action_log))
         fps = CameraConfig().fps
 
-        for i in range(len(return_path)):
-            record = return_path[i]
+        for i, record in enumerate(return_path):
             action = record.action
 
-            print(f"Return {i+1}/{len(return_path)}: {action}")
-
-            # Start movement
-            self.send_command(action)
-
-            # Calculate correct delay
-            if i < len(return_path) - 1:
-                next_record = return_path[i+1]
-                frame_diff = abs(record.frame - next_record.frame)
-                delay = frame_diff / fps
+            # Swap clockwise/anticlockwise turns
+            if action == "LEFT":
+                return_action = "RIGHT"
+            elif action == "RIGHT":
+                return_action = "LEFT"
             else:
-                delay = 0.3
+                return_action = action  # FORWARD/BACKWARD remain the same
 
+            print(f"Return {i+1}/{len(return_path)}: {return_action} (original: {action})")
+            
+            # Start movement
+            self.send_command(return_action)
 
+        self.send_command("FORWARD")
+        time.sleep(1.0)
+        self.stop()
 
         print("\nReturn sequence complete")
 
@@ -730,6 +729,7 @@ class AutonomousSortingRobot:
                 self.approach_active = True
                 recording_started = True
                 first_detection_time = time.time()
+                self.controller.action_log = []
                 self.controller.start_recording()
                 print(f"\n[TRACK] Target acquired - starting continuous recording")
                 print(f"[TRACK] Will continue recording ALL movements regardless of visibility")
@@ -855,6 +855,7 @@ class AutonomousSortingRobot:
             return_path_copy = list(self.controller.action_log)
 
             print("Performing 180deg turn...")
+            time.sleep(1)
             self.controller.turn_180()
 
             # Restore the recorded path (ensures it wasn't modified)
@@ -864,21 +865,17 @@ class AutonomousSortingRobot:
             self.controller.execute_return_path()
             time.sleep(1)
 
-            if len(self.retrieved_objects) >= 1:
-                print("Repositioning for next search...")
-                self.controller.turn_180()
-                self.controller.forward(self.motion_config.backup_duration)
 
             print("\nReached starting position - STOPPING")
             self.controller.stop()
             time.sleep(1)
 
+
             print("Releasing object...")
             self.controller.release()
-
-            # START RECORDING HERE
-            print("[PATH] Recording from release point")
-            self.controller.start_recording()
+    
+            #print("[PATH] Recording from release point")
+            #self.controller.start_recording()
 
             print("Backing up...")
 
@@ -889,6 +886,7 @@ class AutonomousSortingRobot:
             )
 
             self.controller.backward(self.motion_config.backup_duration)
+            
             self.controller.stop()
 
             print("Turning to face search area...")
