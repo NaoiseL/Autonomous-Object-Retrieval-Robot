@@ -4,8 +4,6 @@
 
 An autonomous mobile robot that finds, grasps, and returns three coloured objects (blue, red, green) in sequence, with no human intervention. A camera and OpenCV identify each object by colour, the robot drives itself into grasping range, picks the object up with a custom 3D-printed servo gripper, then retraces its own path in reverse to return home — repeating for all three objects.
 
-![The three retrieval objects](docs/retrieval-objects.png)
-
 *The three 3D-printed retrieval objects. Each is an inverted cone, so closing the gripper around it also lifts it off the ground — no separate lift axis needed.*
 
 Team project by **Naoise Lowry** and **Caoimhin Malone**.
