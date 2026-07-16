@@ -3,7 +3,7 @@ from flask_socketio import SocketIO, emit
 import threading
 import cv2
 
-AUTH_TOKEN = "bluebot123"
+AUTH_TOKEN = #"Password here"
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
