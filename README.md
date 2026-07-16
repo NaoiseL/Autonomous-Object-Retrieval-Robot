@@ -34,6 +34,7 @@ ORR/
 ├── Arduino_v2.0             # Earlier Arduino iteration
 ├── mBot_Control_v2.ino       # Earlier Arduino iteration
 ├── object_version5.stl      # 3D model of the retrieval object (inverted cone design)
+├── Pictures/              #Various images of the robot
 ├── PiORR/
 │   ├── main.py            # Copy of the core logic with an added, experimental web dashboard integration
 │   ├── server.py          # Flask + SocketIO web dashboard: live video stream, manual override, mission control
